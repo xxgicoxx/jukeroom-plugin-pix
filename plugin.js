@@ -790,7 +790,7 @@ function encodeQr(text) {
 /* ====================================================================== */
 
 /** A matriz vira SVG: escala sozinho e não borra como imagem esticada. */
-function qrSvg(matrix, box) {
+function qrSvg(matrix) {
   var size = matrix.length;
   // margem obrigatoria de 4 modulos: sem ela o leitor nao acha a borda
   var quiet = 4;
@@ -805,16 +805,35 @@ function qrSvg(matrix, box) {
     }
   }
 
+  /*
+    O TAMANHO acompanha a quantidade de módulos, e não é fixo.
+
+    Era 168px para qualquer código, e foi por isso que o QR não lia na prática:
+    um BR Code de PIX cai na versão 7 (53 módulos com a margem), e 168/53 dá
+    3,17px por módulo. Abaixo de ~4px a câmera de celular não separa um módulo
+    do vizinho — o autofoco fica caçando e a leitura falha, embora o desenho
+    esteja correto. Um decodificador que lê a imagem pixel a pixel acerta, o que
+    torna o defeito fácil de não perceber em teste.
+
+    Aqui cada módulo ganha 5px cheios, com piso de 160 (código curto não fica
+    minúsculo) e teto de 280 (não pode estourar a largura do painel). Também
+    `shape-rendering: crispEdges`: sem isso o navegador suaviza as bordas ao
+    escalar e cinza aparece entre módulos vizinhos, que é o outro jeito de um QR
+    correto ficar ilegível.
+  */
+  var alvo = Math.max(160, Math.min(280, full * 5));
+
   return (
     '<svg viewBox="0 0 ' +
     full +
     ' ' +
     full +
     '" width="' +
-    box +
+    alvo +
     '" height="' +
-    box +
-    '" role="img" aria-label="QR Code do PIX" style="border-radius:8px">' +
+    alvo +
+    '" role="img" aria-label="QR Code do PIX"' +
+    ' style="border-radius:8px;shape-rendering:crispEdges;max-width:100%;height:auto">' +
     '<rect width="' +
     full +
     '" height="' +
@@ -857,7 +876,7 @@ function render() {
   var svg;
 
   try {
-    svg = qrSvg(encodeQr(payload), 168);
+    svg = qrSvg(encodeQr(payload));
   } catch (e) {
     jr.root.innerHTML = '<p class="jr-empty">' + jr.escape(e.message) + '</p>';
 

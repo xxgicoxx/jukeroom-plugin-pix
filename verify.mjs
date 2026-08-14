@@ -181,5 +181,68 @@ api.render();
 
 ok(jr.root.innerHTML.includes('Ajude o mods!'), 'o recado da sala aparece na tela');
 
+console.log('\n[5] o QR e GRANDE o bastante para uma camera');
+
+/*
+  O defeito que nao aparece em teste de software: o codigo estava CERTO e nao
+  lia no celular.
+
+  O SVG saia com 168px fixos para qualquer versao. Um BR Code de PIX cai na
+  versao 7 — 45 modulos, 53 com a margem obrigatoria — e 168/53 da' 3,17px por
+  modulo. Abaixo de ~4px a camera nao separa um modulo do vizinho: o autofoco
+  fica cacando e a leitura falha. Um decodificador que le a imagem pixel a pixel
+  acerta assim mesmo, e foi por isso que o [2] acima passava o tempo todo.
+
+  Aqui a medida e' a que a camera enxerga.
+*/
+jr.settings = { pixKey: 'mods@jukeroom.com', name: 'JUKEROOM MODS', city: 'SAO PAULO' };
+jr.root.innerHTML = '';
+api.render();
+
+const svg = /<svg[^>]*>/.exec(jr.root.innerHTML)?.[0] ?? '';
+const box = /viewBox="0 0 (\d+)/.exec(svg);
+const larguraPx = /width="(\d+)"/.exec(svg);
+
+ok(!!box && !!larguraPx, 'o SVG declara viewBox e largura', svg.slice(0, 70));
+
+if (box && larguraPx) {
+  const modulos = Number(box[1]);
+  const porModulo = Number(larguraPx[1]) / modulos;
+
+  ok(
+    porModulo >= 4,
+    'cada modulo tem pelo menos 4px na tela',
+    `${porModulo.toFixed(2)}px (${larguraPx[1]}px / ${modulos} modulos)`,
+  );
+}
+
+/*
+  E o navegador nao pode SUAVIZAR as bordas ao escalar: o cinza que aparece
+  entre modulos vizinhos e' o outro jeito de um QR correto ficar ilegivel.
+*/
+ok(/crispEdges/.test(svg), 'e as bordas nao sao suavizadas', /shape-rendering[^;"]*/.exec(svg)?.[0]);
+
+/* Codigo curto nao pode ficar minusculo, nem codigo longo estourar o painel. */
+const medida = (texto) => {
+  const m = api.encodeQr(texto);
+  const full = m.length + 8;
+  const alvo = Math.max(160, Math.min(280, full * 5));
+
+  return { modulos: full, px: alvo, porModulo: alvo / full };
+};
+
+for (const [texto, rotulo] of [
+  ['A'.repeat(10), 'codigo curto'],
+  ['A'.repeat(287), 'codigo no limite'],
+]) {
+  const m = medida(texto);
+
+  ok(
+    m.px >= 160 && m.px <= 280,
+    `${rotulo} fica entre 160 e 280px`,
+    `${m.px}px · ${m.porModulo.toFixed(2)}px por modulo`,
+  );
+}
+
 console.log(falhas ? `\n${falhas} FALHA(S)` : '\ntudo passou');
 process.exit(falhas ? 1 : 0);
