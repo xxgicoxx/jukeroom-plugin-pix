@@ -1,0 +1,7 @@
+{
+  "name": "PIX da sala",
+  "summary": "Mostra um QR Code PIX e um recado, para quem quiser ajudar a sala.",
+  "api": 1,
+  "slot": "panel",
+  "permissions": []
+}
