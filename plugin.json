@@ -3,5 +3,17 @@
   "summary": "Mostra um QR Code PIX e um recado, para quem quiser ajudar a sala.",
   "api": 1,
   "slot": "panel",
-  "permissions": []
+  "permissions": [],
+  "settings": [
+    {
+      "key": "pixKey",
+      "label": "Chave PIX",
+      "placeholder": "e-mail, CPF/CNPJ, telefone (+5511…) ou chave aleatória"
+    },
+    { "key": "name", "label": "Nome do recebedor", "placeholder": "como aparece no banco" },
+    { "key": "city", "label": "Cidade", "placeholder": "SAO PAULO" },
+    { "key": "amount", "label": "Valor fixo (opcional)", "placeholder": "vazio = quem paga escolhe" },
+    { "key": "message", "label": "Recado", "placeholder": "Ajude o mods!" },
+    { "key": "note", "label": "Linha de apoio (opcional)", "placeholder": "Qualquer valor ajuda." }
+  ]
 }

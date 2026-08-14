@@ -9,11 +9,14 @@ const src = fs.readFileSync(SRC, 'utf8');
 const jr = {
   root: { innerHTML: '', querySelector: () => null },
   escape: (t) => String(t),
+  /* o ajuste que a sala preencheu: no app chega por postMessage */
+  settings: {},
+  on: () => {},
 };
 
 const load = new Function(
   'jr',
-  `${src}\nreturn { encodeQr, brCode, CONFIG, capacity, utf8, crc16 };`,
+  `${src}\nreturn { encodeQr, brCode, config, PADRAO, capacity, utf8, crc16, render };`,
 );
 const api = load(jr);
 
@@ -75,7 +78,10 @@ const roundTrip = (texto, rotulo) => {
 
 console.log('\n[1] o BR Code do PIX');
 
-const payload = api.brCode(api.CONFIG);
+/* a sala preencheu os ajustes: e' de la' que a configuracao vem */
+jr.settings = { pixKey: 'mods@jukeroom.com', name: 'JUKEROOM MODS', city: 'SAO PAULO' };
+
+const payload = api.brCode(api.config());
 
 console.log(`  payload (${payload.length} chars): ${payload}`);
 ok(payload.startsWith('000201'), 'comeca com o indicador de formato');
@@ -95,10 +101,10 @@ ok(
 console.log('\n[2] o QR e legivel por um leitor de verdade');
 
 roundTrip(payload, 'o PIX configurado volta identico');
-roundTrip(api.brCode({ ...api.CONFIG, key: '11122233344', amount: '25.50' }), 'com CPF e valor');
+roundTrip(api.brCode({ ...api.config(), key: '11122233344', amount: '25.50' }), 'com CPF e valor');
 roundTrip(
   api.brCode({
-    ...api.CONFIG,
+    ...api.config(),
     key: '123e4567-e89b-12d3-a456-426614174000',
     name: 'ASSOCIACAO DE MODERADORES DO JUKEROOM',
     city: 'RIO DE JANEIRO',
@@ -121,6 +127,59 @@ try {
 }
 
 ok(estourou, 'e recusa o que nao cabe, em vez de desenhar lixo');
+
+console.log('\n[4] a configuracao vem da SALA, e nao do arquivo');
+
+/*
+  O que faz o plugin ser GENERICO: o mesmo codigo, instalado em duas salas, gera
+  dois codigos PIX diferentes. Com a chave escrita no arquivo, cada sala teria de
+  bifurcar o repositorio para trocar uma linha — e a chave de uma ficaria no
+  codigo de todas as outras.
+*/
+jr.settings = {};
+jr.root.innerHTML = '';
+api.render();
+
+ok(
+  /chave PIX configurada/i.test(jr.root.innerHTML),
+  'sem ajuste, o plugin pede a configuracao em vez de desenhar um QR invalido',
+  jr.root.innerHTML
+    .replace(/<[^>]+>/g, ' ')
+    .trim()
+    .slice(0, 50),
+);
+
+jr.settings = { pixKey: 'sala-a@exemplo.com', name: 'SALA A', city: 'RECIFE' };
+
+const codigoA = api.brCode(api.config());
+
+jr.settings = { pixKey: 'sala-b@exemplo.com', name: 'SALA B', city: 'CURITIBA' };
+
+const codigoB = api.brCode(api.config());
+
+ok(codigoA.includes('sala-a@exemplo.com'), 'a chave da sala A entra no codigo dela');
+ok(codigoB.includes('sala-b@exemplo.com'), 'a da sala B, no dela');
+ok(codigoA !== codigoB, 'e os dois sao diferentes, com o MESMO plugin instalado');
+roundTrip(codigoA, 'o codigo da sala A e legivel');
+roundTrip(codigoB, 'o da sala B tambem');
+
+/* Valor fixo e' opcional: com ele o campo 54 aparece, sem ele quem paga escolhe. */
+jr.settings = { pixKey: 'x@y.com', name: 'SALA', city: 'SP', amount: '25,50' };
+
+const comValor = api.brCode(api.config());
+
+ok(comValor.includes('540525.50'), 'o valor fixo entra formatado', comValor.slice(50, 78));
+
+jr.settings = { pixKey: 'x@y.com', name: 'SALA', city: 'SP' };
+
+ok(!/5405\d/.test(api.brCode(api.config())), 'e sem valor, o campo nem aparece');
+
+/* O recado tambem e' da sala, e nao uma frase presa no codigo. */
+jr.settings = { pixKey: 'x@y.com', name: 'S', city: 'SP', message: 'Ajude o mods!' };
+jr.root.innerHTML = '';
+api.render();
+
+ok(jr.root.innerHTML.includes('Ajude o mods!'), 'o recado da sala aparece na tela');
 
 console.log(falhas ? `\n${falhas} FALHA(S)` : '\ntudo passou');
 process.exit(falhas ? 1 : 0);

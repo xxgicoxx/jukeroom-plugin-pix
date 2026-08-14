@@ -19,26 +19,52 @@
   parte do que está aqui — o plugin em si são as últimas quarenta linhas.
   ------------------------------------------------------------------------
 
-  PARA USAR: troque os valores de CONFIG logo abaixo e publique. A chave é sua,
-  então o caminho é bifurcar este repositório, editar e publicar a sua cópia
-  (JukeRoom guarda uma cópia do código no momento de publicar; trocar o arquivo
-  no GitHub depois não muda nada em sala nenhuma).
+  PARA USAR: instale o plugin na sala e preencha a chave PIX nos AJUSTES dele.
+  Nada aqui precisa ser editado — o mesmo código serve para qualquer sala, e
+  cada uma guarda a própria configuração.
 */
 
-var CONFIG = {
-  /* A chave PIX: CPF, CNPJ, e-mail, telefone (+5511...) ou chave aleatória. */
-  key: 'mods@jukeroom.com',
-  /* Nome do recebedor, como aparece no app do banco. Até 25 caracteres. */
-  name: 'JUKEROOM MODS',
-  /* Cidade do recebedor. Até 15 caracteres. */
+/*
+  A configuração vem da SALA, e não deste arquivo.
+
+  Quem instalou preenche chave, nome, cidade e recado nos ajustes do plugin, e
+  os valores chegam em `jr.settings`. O manifesto declara esses campos; o
+  servidor só guarda os que estão lá.
+
+  Isso é o que torna o plugin genérico: o mesmo código serve para qualquer sala.
+  Com a chave escrita aqui dentro, cada uma precisaria bifurcar o repositório e
+  publicar a própria cópia para trocar uma linha — e a chave PIX de alguém
+  ficaria no código de todo mundo.
+
+  Os valores abaixo são só o EXEMPLO que aparece antes de alguém preencher.
+*/
+var PADRAO = {
+  pixKey: '',
+  name: '',
   city: 'SAO PAULO',
-  /* Valor fixo em reais, ou '' para quem paga escolher quanto. */
   amount: '',
-  /* O recado, em cima do QR. */
-  message: 'Ajude o mods!',
-  /* Uma linha menor embaixo do recado. Deixe '' para não mostrar. */
-  note: 'Qualquer valor ajuda a manter a sala no ar.',
+  message: 'Ajude a sala!',
+  note: '',
 };
+
+/** O ajuste da sala por cima do exemplo. */
+function config() {
+  var s = jr.settings || {};
+  var out = {};
+
+  for (var k in PADRAO) {
+    if (Object.prototype.hasOwnProperty.call(PADRAO, k)) {
+      var v = s[k] === undefined || s[k] === null ? '' : String(s[k]).trim();
+
+      out[k] = v || PADRAO[k];
+    }
+  }
+
+  // o codificador fala 'key'; o ajuste fala 'pixKey', que e' mais claro na tela
+  out.key = out.pixKey;
+
+  return out;
+}
 
 /* ====================================================================== */
 /* BR Code: o texto que vira o QR                                          */
@@ -801,10 +827,27 @@ function qrSvg(matrix, box) {
 }
 
 function render() {
+  var cfg = config();
+
+  /*
+    Sem chave, o plugin EXPLICA em vez de mostrar um QR quebrado.
+
+    É o estado em que ele nasce: instalado e ainda não configurado. Desenhar um
+    código inválido aqui seria pior que não desenhar nada — alguém pagaria para
+    o lugar errado, ou o banco recusaria sem dizer por quê.
+  */
+  if (!cfg.key) {
+    jr.root.innerHTML =
+      '<p class="jr-empty">Nenhuma chave PIX configurada ainda.<br>' +
+      '<span class="jr-faint">Quem modera a sala preenche isso nos ajustes do plugin.</span></p>';
+
+    return;
+  }
+
   var payload;
 
   try {
-    payload = brCode(CONFIG);
+    payload = brCode(cfg);
   } catch (e) {
     jr.root.innerHTML = '<p class="jr-empty">Configuração do PIX inválida.</p>';
 
@@ -824,10 +867,10 @@ function render() {
   jr.root.innerHTML =
     '<div style="text-align:center">' +
     '<div class="jr-strong" style="font-size:15px">' +
-    jr.escape(CONFIG.message) +
+    jr.escape(cfg.message) +
     '</div>' +
-    (CONFIG.note
-      ? '<div class="jr-muted" style="margin-top:2px">' + jr.escape(CONFIG.note) + '</div>'
+    (cfg.note
+      ? '<div class="jr-muted" style="margin-top:2px">' + jr.escape(cfg.note) + '</div>'
       : '') +
     '</div>' +
     '<div style="display:flex;justify-content:center">' +
@@ -848,5 +891,7 @@ function render() {
     };
   }
 }
+
+jr.on('settings', render);
 
 render();
