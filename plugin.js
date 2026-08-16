@@ -81,7 +81,121 @@ function field(id, value) {
   var bytes = utf8(String(value));
   var len = String(bytes.length);
 
+  /*
+    Acima de 99 bytes o tamanho não cabe nos dois dígitos, e o campo passaria a
+    ocupar três — o que EMPURRA todo o resto do código uma casa para o lado. O
+    banco lê o campo seguinte no lugar errado e recusa sem dizer por quê.
+
+    Isso acontece de verdade quando alguém cola no campo "chave" o copia e cola
+    inteiro que o banco gerou. Melhor estourar aqui, onde `render` transforma o
+    erro em recado, do que devolver uma cadeia corrompida com cara de válida.
+  */
+  if (bytes.length > 99) {
+    throw new Error('campo ' + id + ' tem ' + bytes.length + ' bytes; o máximo é 99');
+  }
+
   return id + (len.length < 2 ? '0' + len : len) + String(value);
+}
+
+/**
+ * O valor fixo, em reais, ou `null` quando não dá para ler.
+ *
+ * `Number('R$ 10,50')` é `NaN`, e o `NaN` virava o texto "NaN" dentro do campo
+ * 54 — um código com cara de certo que TODO banco recusa. E "R$ 10,50" é o que
+ * uma pessoa escreve num campo chamado "valor"; o defeito estava no leitor, e
+ * não em quem digitou.
+ *
+ * Regra dos separadores: o último separador seguido de um ou dois dígitos é a
+ * vírgula decimal, e os anteriores são de milhar. É o que faz "1.234,56" e
+ * "1,234.56" caírem os dois em 1234.56 sem precisar saber a região de quem
+ * digitou.
+ */
+function money(text) {
+  var typed = String(text).trim();
+
+  // o menos some no `replace` abaixo, e "-5" viraria uma cobrança de cinco reais
+  if (typed.indexOf('-') !== -1) {
+    return null;
+  }
+
+  var raw = typed.replace(/[^\d.,]/g, '');
+
+  if (!raw) {
+    return null;
+  }
+
+  var cut = Math.max(raw.lastIndexOf(','), raw.lastIndexOf('.'));
+  var whole = cut === -1 ? raw : raw.slice(0, cut);
+  var cents = cut === -1 ? '' : raw.slice(cut + 1);
+
+  // separador com três dígitos depois é de milhar, e não decimal: "1.234"
+  if (cents.length === 3 || cents.length === 0) {
+    whole = raw;
+    cents = '';
+  }
+
+  /*
+    A parte inteira é um número corrido ou grupos de milhar bem formados. Sem
+    esta conferência, "10,5,5" virava 105,50 — um valor INVENTADO a partir de
+    algo que ninguém sabe o que queria dizer, e cobrado de quem paga.
+  */
+  if (!/^\d+$/.test(whole) && !/^\d{1,3}([.,]\d{3})+$/.test(whole)) {
+    return null;
+  }
+
+  whole = whole.replace(/[.,]/g, '');
+
+  if (cents && !/^\d{1,2}$/.test(cents)) {
+    return null;
+  }
+
+  var n = Number(whole + '.' + (cents || '0'));
+
+  // o campo 54 tem treze caracteres: acima disso não há como escrever o valor
+  if (!isFinite(n) || n <= 0 || n > 9999999999) {
+    return null;
+  }
+
+  return n.toFixed(2);
+}
+
+/**
+ * O que impede este código de ser pago — em português, para quem configurou.
+ *
+ * Existia só a guarda da chave vazia. O resto passava direto e desenhava um QR
+ * que o banco recusa: sem o nome do recebedor o campo 59 sai com tamanho zero
+ * (`5900`), que é obrigatório no padrão, e o app do banco fecha com um erro
+ * genérico. Quem instalou vê um QR bonito e conclui que o problema é do banco.
+ *
+ * Um QR errado é PIOR que nenhum QR: ele parece pronto.
+ */
+function problems(cfg) {
+  var list = [];
+  var key = String(cfg.key || '').trim();
+
+  if (!key) {
+    list.push('a chave PIX');
+  } else if (/^000201/.test(key)) {
+    list.push('a chave PIX — o que está aí é o copia e cola inteiro do banco, e não a chave');
+  } else if (/\s/.test(key)) {
+    list.push('a chave PIX — ela não pode ter espaço');
+  } else if (utf8(key).length > 77) {
+    list.push('a chave PIX — ela passa de 77 caracteres');
+  }
+
+  if (!plain(cfg.name, 25)) {
+    list.push('o nome do recebedor');
+  }
+
+  if (!plain(cfg.city, 15)) {
+    list.push('a cidade');
+  }
+
+  if (String(cfg.amount || '').trim() && money(cfg.amount) === null) {
+    list.push('o valor fixo — escreva só o número, como 10,50 (ou deixe vazio)');
+  }
+
+  return list;
 }
 
 /** Só o que o padrão aceita: sem acento, em maiúsculas, sem sobra. */
@@ -125,14 +239,28 @@ function crc16(text) {
 
 /** Monta o BR Code (o "copia e cola" do PIX). */
 function brCode(cfg) {
+  /*
+    Nada de montar um código pela metade.
+
+    Os campos 59 e 60 são obrigatórios no padrão, e antes daqui eles saíam
+    vazios sempre que o ajuste estava em branco — `5900` é um campo legítimo em
+    forma e recusado em conteúdo. Estourar é o que faz `render` conseguir dizer
+    o que falta, em vez de desenhar o QR e esperar o banco explicar.
+  */
+  var falta = problems(cfg);
+
+  if (falta.length) {
+    throw new Error('falta ' + falta.join('; '));
+  }
+
   var account = field('00', 'BR.GOV.BCB.PIX') + field('01', String(cfg.key).trim());
-  var value = String(cfg.amount || '').replace(',', '.');
+  var value = String(cfg.amount || '').trim() ? money(cfg.amount) : null;
   var out =
     field('00', '01') +
     field('26', account) +
     field('52', '0000') +
     field('53', '986') +
-    (value ? field('54', Number(value).toFixed(2)) : '') +
+    (value ? field('54', value) : '') +
     field('58', 'BR') +
     field('59', plain(cfg.name, 25)) +
     field('60', plain(cfg.city, 15)) +
@@ -868,7 +996,18 @@ function render() {
   try {
     payload = brCode(cfg);
   } catch (e) {
-    jr.root.innerHTML = '<p class="jr-empty">Configuração do PIX inválida.</p>';
+    /*
+      DIZ O QUE FALTA.
+
+      Antes era "Configuração do PIX inválida." para qualquer causa — e nem isso
+      aparecia no caso comum, porque só a chave vazia era conferida e o resto
+      seguia até virar QR. Quem modera a sala precisa saber QUAL campo abrir; a
+      mensagem genérica manda procurar em seis.
+    */
+    jr.root.innerHTML =
+      '<p class="jr-empty">Falta preencher ' +
+      jr.escape(String(e.message).replace(/^falta /, '')) +
+      '.<br><span class="jr-faint">Nos ajustes do plugin, em quem modera a sala.</span></p>';
 
     return;
   }

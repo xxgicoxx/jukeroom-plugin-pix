@@ -16,7 +16,7 @@ const jr = {
 
 const load = new Function(
   'jr',
-  `${src}\nreturn { encodeQr, brCode, config, PADRAO, capacity, utf8, crc16, render };`,
+  `${src}\nreturn { encodeQr, brCode, config, PADRAO, capacity, utf8, crc16, render, money, problems, field };`,
 );
 const api = load(jr);
 
@@ -243,6 +243,129 @@ for (const [texto, rotulo] of [
     `${m.px}px · ${m.porModulo.toFixed(2)}px por modulo`,
   );
 }
+
+console.log('\n[6] o codigo que o BANCO recusa nao chega a ser desenhado');
+
+/*
+  Os tres defeitos desta secao tinham o MESMO sintoma: um QR bonito na tela e um
+  erro generico no app do banco. Nenhum deles aparecia aqui, porque [1] e [2] so'
+  perguntavam se o codigo era LEGIVEL — e ele era. Ilegivel e invalido sao
+  problemas diferentes, e o segundo so' se vê analisando os campos.
+*/
+
+/** Os campos do payload, um a um, como o banco os le'. */
+const campos = (s) => {
+  const out = {};
+  let i = 0;
+
+  while (i + 4 <= s.length) {
+    const id = s.slice(i, i + 2);
+    const len = Number(s.slice(i + 2, i + 4));
+
+    if (!Number.isInteger(len)) break;
+
+    out[id] = s.slice(i + 4, i + 4 + len);
+    i += 4 + len;
+  }
+
+  return out;
+};
+
+const recusado = (settings, rotulo, esperado) => {
+  jr.settings = settings;
+
+  let erro = null;
+
+  try {
+    api.brCode(api.config());
+  } catch (e) {
+    erro = e.message;
+  }
+
+  ok(!!erro && new RegExp(esperado, 'i').test(erro), rotulo, erro ?? 'MONTOU o codigo assim mesmo');
+};
+
+/*
+  O nome do recebedor VAZIO e' o caso mais provavel de todos: e' o estado em que
+  o plugin nasce (PADRAO.name e' ''), e nada obrigava a preencher. O campo 59 e'
+  obrigatorio no padrao e saia como `5900` — tamanho zero.
+*/
+recusado({ pixKey: 'x@y.com', city: 'SP' }, 'sem nome do recebedor, nao monta', 'nome do recebedor');
+recusado({ pixKey: 'x@y.com', name: '   ' }, 'nome so' + ' com espaco tambem nao', 'nome');
+recusado({ pixKey: 'x@y.com', name: 'A', city: '☺' }, 'cidade que some ao limpar', 'cidade');
+
+/*
+  `Number('R$ 10,50')` e' NaN, e o "NaN" ia inteiro para dentro do campo 54 —
+  `5403NaN`. Agora "R$ 10,50" e' LIDO (ver os casos de money abaixo), porque e'
+  o que uma pessoa escreve num campo chamado "valor"; o que sobra sem leitura
+  possivel vira recado, e nao um numero inventado.
+*/
+recusado({ pixKey: 'x@y.com', name: 'A', amount: 'dez reais' }, 'valor por extenso vira recado', 'valor');
+recusado({ pixKey: 'x@y.com', name: 'A', amount: '10,5,5' }, 'valor ambiguo tambem', 'valor');
+
+/* Colar o copia e cola inteiro no campo da chave: 26 estouraria os 99 bytes. */
+recusado(
+  { pixKey: '00020126490014BR.GOV.BCB.PIX0127x@y.com5204000053039865802BR', name: 'A' },
+  'copia e cola colado no campo da chave',
+  'copia e cola',
+);
+
+/* E o que e' valido continua passando — inclusive o que antes virava NaN. */
+for (const [texto, esperado] of [
+  ['10,50', '10.50'],
+  ['10.50', '10.50'],
+  ['R$ 10,50', '10.50'],
+  ['1.234,56', '1234.56'],
+  ['1,234.56', '1234.56'],
+  ['1234', '1234.00'],
+  ['7', '7.00'],
+  ['  25 ', '25.00'],
+]) {
+  ok(api.money(texto) === esperado, `"${texto}" vira ${esperado}`, String(api.money(texto)));
+}
+
+for (const texto of ['', 'abc', '0', '-5', '10,5,5', 'R$']) {
+  ok(api.money(texto) === null, `"${texto}" nao vira valor nenhum`, String(api.money(texto)));
+}
+
+/*
+  A prova final: o payload de uma configuracao COMPLETA, campo a campo. E' o que
+  o app do banco faz antes de aceitar.
+*/
+jr.settings = { pixKey: 'mods@jukeroom.com', name: 'JUKEROOM MODS', city: 'SAO PAULO', amount: 'R$ 10,50' };
+
+const bom = campos(api.brCode(api.config()));
+
+ok(bom['59'].length >= 1 && bom['59'].length <= 25, 'o nome do recebedor tem de 1 a 25', bom['59']);
+ok(bom['60'].length >= 1 && bom['60'].length <= 15, 'a cidade tem de 1 a 15', bom['60']);
+ok(/^\d+\.\d{2}$/.test(bom['54']), 'o valor sai como numero, e nao como NaN', bom['54']);
+ok(bom['53'] === '986' && bom['58'] === 'BR', 'moeda 986 e pais BR');
+ok(bom['26'].includes('BR.GOV.BCB.PIX'), 'e o arranjo PIX segue la');
+
+/* Nenhum campo pode passar de 99 bytes, ou o proximo e' lido no lugar errado. */
+let estourouCampo = false;
+
+try {
+  api.field('26', 'A'.repeat(100));
+} catch {
+  estourouCampo = true;
+}
+
+ok(estourouCampo, 'campo acima de 99 bytes estoura em vez de corromper o resto');
+
+/* E a tela DIZ qual campo abrir, em vez de "configuracao invalida". */
+jr.settings = { pixKey: 'x@y.com', city: 'SP' };
+jr.root.innerHTML = '';
+api.render();
+
+ok(
+  /nome do recebedor/i.test(jr.root.innerHTML),
+  'e a tela nomeia o campo que falta',
+  jr.root.innerHTML
+    .replace(/<[^>]+>/g, ' ')
+    .trim()
+    .slice(0, 60),
+);
 
 console.log(falhas ? `\n${falhas} FALHA(S)` : '\ntudo passou');
 process.exit(falhas ? 1 : 0);

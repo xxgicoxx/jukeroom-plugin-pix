@@ -7,12 +7,20 @@
   "settings": [
     {
       "key": "pixKey",
-      "label": "Chave PIX",
+      "label": "Chave PIX (obrigatória)",
       "placeholder": "e-mail, CPF/CNPJ, telefone (+5511…) ou chave aleatória"
     },
-    { "key": "name", "label": "Nome do recebedor", "placeholder": "como aparece no banco" },
-    { "key": "city", "label": "Cidade", "placeholder": "SAO PAULO" },
-    { "key": "amount", "label": "Valor fixo (opcional)", "placeholder": "vazio = quem paga escolhe" },
+    {
+      "key": "name",
+      "label": "Nome do recebedor (obrigatório)",
+      "placeholder": "como aparece no banco — sem ele o banco recusa o código"
+    },
+    { "key": "city", "label": "Cidade (obrigatória)", "placeholder": "SAO PAULO" },
+    {
+      "key": "amount",
+      "label": "Valor fixo (opcional)",
+      "placeholder": "só o número: 10,50 — vazio = quem paga escolhe"
+    },
     { "key": "message", "label": "Recado", "placeholder": "Ajude o mods!" },
     { "key": "note", "label": "Linha de apoio (opcional)", "placeholder": "Qualquer valor ajuda." }
   ]
